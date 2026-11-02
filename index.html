@@ -53,7 +53,7 @@ tfoot td,tr.t td{font-weight:700}
 <div id="phead" class="pshow"></div>
 <nav id="nav"></nav>
 <section id="dash"></section>
-<section id="entry"></section>
+<section id="entry" hidden></section>
 <section id="report" hidden></section>
 <section id="pending" hidden></section>
 <section id="rep" hidden></section>
@@ -64,9 +64,6 @@ tfoot td,tr.t td{font-weight:700}
 </div>
 
 <script>
-// ==========================================
-// SUPABASE CREDENTIALS
-// ==========================================
 const SUPABASE_URL = 'https://hscthdlawgutffetphmp.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_1soI-v725uPW7FLkGjfdZg_tvkwdfJB';
 
@@ -76,7 +73,7 @@ try {
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   }
 } catch(e) {
-  console.error('Supabase initialization error:', e);
+  console.error('Supabase init error:', e);
 }
 
 const STAFF = ['GE VARGHESE','ABI','NISHANTH','ANANDHU','ANANDHU NEW','SOUMYA','ARYA','ANNA','APPU'];
@@ -123,8 +120,9 @@ function loadLocal() {
     const raw = localStorage.getItem('cbc_sales_data');
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed.S) S = parsed.S;
-      if (parsed.D) D = parsed.D;
+      if (parsed.S && Array.isArray(parsed.S.entries)) S.entries = parsed.S.entries;
+      if (parsed.S && Array.isArray(parsed.S.expenses)) S.expenses = parsed.S.expenses;
+      if (parsed.D && typeof parsed.D === 'object') D = parsed.D;
     }
   } catch(e) {}
 }
@@ -146,23 +144,4 @@ async function add(c, o) {
   } catch(e) { oops(e); }
 }
 
-async function upd(c, id, o) {
-  try {
-    if (sb) {
-      const { error } = await sb.from(c).update(o).eq('id', id);
-      if (error) throw error;
-    }
-    const itm = S[c].find(x => x.id === id);
-    if (itm) Object.assign(itm, o);
-    persistLocal();
-    render();
-  } catch(e) { oops(e); }
-}
-
-async function del(c, id) {
-  try {
-    if (sb) {
-      const { error } = await sb.from(c).delete().eq('id', id);
-      if (error) throw error;
-    }
-    S[c] = S
+async function upd(c, id,
