@@ -471,9 +471,15 @@ async function start(session){
   await Promise.all(['entries','expenses','days'].map(load));
   ['entries','expenses','days'].forEach(t=>sb.channel('live-'+t).on('postgres_changes',{event:'*',schema:'public',table:t},()=>loadSoon(t)).subscribe());
 }
-(async()=>{
-  if(!sb){$('#warn').innerHTML='<div class="warn">Supabase is not set up yet (or its script could not load). Open index.html and fill in SUPABASE_URL and SUPABASE_KEY at the top of the script.</div>';return}
-  const {data:{session}}=await sb.auth.getSession();
-  session?start(session):showLogin();
+(async () => {
+  loadLocal();
+  buildEntry();
+  render();
+  try{if(window.claude)db=await claude.use('db')}catch(e){db=null}
+  try{const u=await claude.use('user');RO=!!u&&u.can('data.write')===false}catch(e){}
+  if(db){
+    ...
+  }
+  await initSupabase();
 })();
 </script></body></html>
