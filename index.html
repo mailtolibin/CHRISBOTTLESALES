@@ -40,7 +40,7 @@ tfoot td,tr.t td{font-weight:700}
  input,select{border:0;background:none;padding:0;appearance:none}
 }
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script></head><body><div class="wrap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script></head><body><div class="wrap">
 <h1>Chris Bottle Crafters – Daily Sale Manager</h1>
 <div id="warn"></div><div id="phead" class="pshow"></div>
 <nav id="nav"></nav>
@@ -49,10 +49,15 @@ tfoot td,tr.t td{font-weight:700}
 <div id="modal"><div class="card" id="mbox"></div></div>
 </div>
 <script>
+/* ======== SUPABASE SETTINGS – paste your own two values (Supabase > Project Settings > API Keys) ========
+   Use the PUBLISHABLE key (sb_publishable_...) or the legacy anon key. NEVER use a secret / service_role key here. */
+const SUPABASE_URL='https://hscthdlawgutffetphmp.supabase.co/rest/v1/';
+const SUPABASE_KEY='sb_publishable_1soI-v725uPW7FLkGjfdZg_tvkwdfJB	';
+/* ======================================================================================================== */
 const STAFF=['GE VARGHESE','ABI','NISHANTH','ANANDHU','ANANDHU NEW','SOUMYA','ARYA','ANNA','APPU'];
 const MODES=['CASH','DLAKSHMI','G PAY','PHPAY','YB POS','CARD','YB ACCOUNT','HDFC','PAID EARLIER','NP'];
 const TABS=[['dash','Dashboard'],['entry','Entry'],['report','Day report'],['pending','Pending bills'],['inc','Incentive'],['month','Month'],['rep','Report']];
-const S={entries:[],expenses:[]};let D={},db=null,dl=null,RO=false,tab='dash';
+const S={entries:[],expenses:[]};let D={},RO=false,tab='dash';
 const $=s=>document.querySelector(s),fmt=n=>new Intl.NumberFormat('en-IN').format(Math.round(n||0));
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const today=()=>{const d=new Date();return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
@@ -61,10 +66,54 @@ const opts=a=>a.map(x=>`<option>${x}</option>`).join('');
 function note(msg){const t=$('#toast');t.textContent=msg;t.style.display='block';clearTimeout(note.t);note.t=setTimeout(()=>t.style.display='none',6000)}
 function ask(msg,fn){$('#mbox').innerHTML=`<h2>${esc(msg)}</h2><div style="display:flex;gap:8px;margin-top:10px"><button class="p" id="yes">Yes, delete</button><button class="s" onclick="$('#modal').style.display='none'">Cancel</button></div>`;$('#modal').style.display='flex';$('#yes').onclick=()=>{$('#modal').style.display='none';fn()}}
 const oops=e=>note('Could not save: '+((e&&e.message)||e));
-async function add(c,o){try{if(db)await db.collection(c).add(o);else{S[c].push({id:Math.random().toString(36).slice(2),...o});render()}}catch(e){oops(e)}}
-async function upd(c,id,o){try{if(db)await db.collection(c).doc(id).update(o);else{Object.assign(S[c].find(x=>x.id===id),o);render()}}catch(e){oops(e)}}
-async function del(c,id){try{if(db)await db.collection(c).doc(id).delete();else{S[c]=S[c].filter(x=>x.id!==id);render()}}catch(e){oops(e)}}
-async function setDay(d,o){try{if(db)await db.collection('days').doc(d).set({...(D[d]||{}),...o});else{D[d]={...(D[d]||{}),...o};render()}}catch(e){oops(e)}}
+/* ---- data layer: Supabase (PostgreSQL) ---- */
+const sb=(window.supabase&&!SUPABASE_URL.includes('YOUR-'))?window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY):null;
+const num=v=>(v===''||v==null||isNaN(+v))?null:+v;
+const DAYF=['ob','drinks','other'];
+async function fetchAll(c){ /* Supabase returns max 1000 rows per request, so read in pages */
+  const out=[],ord=c==='days'?'day':'created_at';
+  for(let from=0;;from+=1000){
+    let q=sb.from(c).select('*').order(ord);if(c!=='days')q=q.order('id');
+    const {data,error}=await q.range(from,from+999);if(error)throw error;
+    out.push(...data);if(data.length<1000)break}
+  return out}
+async function load(c){
+  try{const rows=await fetchAll(c);
+    if(c==='days'){D={};rows.forEach(r=>{const o={};DAYF.forEach(k=>{if(r[k]!=null)o[k]=r[k]});D[r.day]=o})}
+    else{S[c]=rows;$('#f-inv')&&!$('#f-inv').value&&($('#f-inv').value=nextInv())}
+    render()}catch(e){note('Could not load '+c+': '+((e&&e.message)||e))}}
+const T_={};const loadSoon=c=>{clearTimeout(T_[c]);T_[c]=setTimeout(()=>load(c),250)};
+async function add(c,o){try{const {data,error}=await sb.from(c).insert(o).select().single();if(error)throw error;if(!S[c].some(x=>x.id===data.id))S[c].push(data);render()}catch(e){oops(e)}}
+async function upd(c,id,o){try{const {data,error}=await sb.from(c).update(o).eq('id',id).select().single();if(error)throw error;Object.assign(S[c].find(x=>x.id===id)||{},data);render()}catch(e){oops(e)}}
+async function del(c,id){try{const {error,count}=await sb.from(c).delete({count:'exact'}).eq('id',id);if(error)throw error;if(!count)throw new Error('not allowed, or already deleted');S[c]=S[c].filter(x=>x.id!==id);render()}catch(e){oops(e)}}
+async function setDay(d,o){try{const m={...(D[d]||{}),...o},row={day:d,ob:num(m.ob),drinks:num(m.drinks),other:num(m.other)};
+  const {error}=await sb.from('days').upsert(row);if(error)throw error;
+  const n={};DAYF.forEach(k=>{if(row[k]!=null)n[k]=row[k]});D[d]=n;render()}catch(e){oops(e)}}
+/* downloads: plain browser download (replaces the claude.ai 'downloads' service) */
+const dl={save:async({filename,data})=>{
+  const type=filename.endsWith('.pdf')?'application/pdf':filename.endsWith('.json')?'application/json':'text/csv;charset=utf-8';
+  const blob=new Blob([filename.endsWith('.csv')?['\ufeff',data]:[data]].flat(),{type});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000)}};
+/* login / logout */
+function showLogin(msg){$('#warn').innerHTML=`<div class="card" style="max-width:360px;margin:20px auto"><h2>Sign in</h2><label>Email</label><input id="lg-email" type="email" autocomplete="username"><label style="margin-top:8px">Password</label><input id="lg-pass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"><div style="margin-top:12px"><button class="p" onclick="doLogin()">Sign in</button></div>${msg?`<div class="warn" style="margin-top:10px">${esc(msg)}</div>`:''}</div>`}
+async function doLogin(){const {data,error}=await sb.auth.signInWithPassword({email:$('#lg-email').value.trim(),password:$('#lg-pass').value});if(error)return showLogin(error.message);start(data.session)}
+async function signOut(){await sb.auth.signOut();location.reload()}
+/* backup / restore (JSON) – also used to move old data in from the claude.ai version */
+async function exportAll(){const strip=({id,created_at,...r})=>r;
+  await dl.save({filename:'backup-'+today()+'.json',data:JSON.stringify({app:'daily-sale-manager',version:1,exported:new Date().toISOString(),entries:S.entries.map(strip),expenses:S.expenses.map(strip),days:D},null,1)})}
+async function importAll(inp){
+  const f=inp.files[0];inp.value='';if(!f)return;
+  if(RO)return note('View-only access: restore is not allowed.');
+  try{const j=JSON.parse(await f.text()),t=v=>v==null?'':String(v);
+    if((S.entries.length||S.expenses.length)&&!confirm('This database already has data. Restoring a backup on top of it can create duplicates. Continue?'))return;
+    const E=(j.entries||[]).slice().sort((a,b)=>(a.ts||0)-(b.ts||0)).map(e=>({date:e.date,type:e.type,inv:t(e.inv),staff:t(e.staff),st:t(e.st),cust:t(e.cust),amt:+e.amt||0,mode:t(e.mode),bill:+e.bill||0,settled:!!e.settled,ts:e.ts||null}));
+    const X=(j.expenses||[]).map(x=>({date:x.date,cat:t(x.cat),item:t(x.item),amt:+x.amt||0,type:t(x.type),src:t(x.src),staff:t(x.staff)}));
+    const Y=Object.entries(j.days||{}).map(([d,v])=>({day:d,ob:num(v.ob),drinks:num(v.drinks),other:num(v.other)}));
+    for(const [tb,rows] of [['entries',E],['expenses',X],['days',Y]])for(let i=0;i<rows.length;i+=500){
+      const part=rows.slice(i,i+500),{error}=await(tb==='days'?sb.from(tb).upsert(part):sb.from(tb).insert(part));if(error)throw error}
+    await Promise.all(['entries','expenses','days'].map(load));
+    note('Restored '+E.length+' entries, '+X.length+' expenses, '+Y.length+' day records.')}catch(e){oops(e)}}
 
 /* ---- business rules ----
  SALE: cash received + incentive.  ADV: cash received, NO incentive.
@@ -241,7 +290,7 @@ function renderMonth(){
     MM.forEach(m=>T.m[m]=(T.m[m]||0)+(s.m[m]?s.m[m].RS+s.m[m].WS:0));
     Object.entries(s.st).forEach(([n,a])=>{const t=T.st[n]=T.st[n]||{RS:0,WS:0,adv:0};t.RS+=a.RS;t.WS+=a.WS;t.adv+=a.adv});
     return {d,s}});
-  $('#month').innerHTML=`<div class="card"><label>Month</label><input type="month" value="${month}" style="max-width:200px" onchange="month=this.value;render()"> <button class="s" onclick="exportCsv()">Download CSV</button></div>
+  $('#month').innerHTML=`<div class="card"><label>Month</label><input type="month" value="${month}" style="max-width:200px" onchange="month=this.value;render()"> <button class="s" onclick="exportCsv()">Download CSV</button> <button class="s" onclick="exportAll()">Backup (all data)</button> <button class="s wr" onclick="$('#rfile').click()">Restore backup</button><input type="file" id="rfile" accept=".json,application/json" hidden onchange="importAll(this)"></div>
   <div class="grid"><div class="card"><div class="mut">Retail</div><div class="kpi">₹${fmt(T.rs)}</div></div><div class="card"><div class="mut">Wholesale</div><div class="kpi">₹${fmt(T.ws)}</div></div><div class="card"><div class="mut">Total</div><div class="kpi">₹${fmt(T.rs+T.ws)}</div></div><div class="card"><div class="mut">Daily average (${ds.length} days)</div><div class="kpi">₹${fmt(ds.length?(T.rs+T.ws)/ds.length:0)}</div></div></div>
   <div class="card"><h2>Daily payment record</h2><div class="sc"><table><thead><tr><th>Date</th>${MM.map(m=>`<th>${m}</th>`).join('')}<th>Retail</th><th>Wholesale</th><th>Total</th></tr></thead><tbody>${rows.map(({d,s})=>`<tr><td>${d}</td>${MM.map(m=>`<td>${fmt(s.m[m]?s.m[m].RS+s.m[m].WS:0)}</td>`).join('')}<td>${fmt(s.rs)}</td><td>${fmt(s.ws)}</td><td>${fmt(s.total)}</td></tr>`).join('')}</tbody><tfoot><tr><td>Total</td>${MM.map(m=>`<td>${fmt(T.m[m])}</td>`).join('')}<td>${fmt(T.rs)}</td><td>${fmt(T.ws)}</td><td>${fmt(T.rs+T.ws)}</td></tr></tfoot></table></div></div>
   <div class="card"><h2>Expenses – month (company and personal; advances are listed separately below)</h2>${expMonth()}</div>
@@ -409,19 +458,22 @@ function pieCard(M){
 /* ---- shell ---- */
 function render(){
   $('#phead').textContent='Chris Bottle Crafters – '+(TABS.find(t=>t[0]===tab)||[])[1]+' – '+(tab==='dash'||tab==='entry'||tab==='report'?day:tab==='pending'?today():month);
-  $('#nav').innerHTML=TABS.map(t=>`<button class="${tab===t[0]?'on':''}" onclick="tab='${t[0]}';render()">${t[1]}</button>`).join('');
+  $('#nav').innerHTML=TABS.map(t=>`<button class="${tab===t[0]?'on':''}" onclick="tab='${t[0]}';render()">${t[1]}</button>`).join('')+'<button class="s noprint" style="margin-left:auto" onclick="signOut()">Sign out</button>';
   TABS.forEach(t=>$('#'+t[0]).hidden=tab!==t[0]);
   if(tab==='dash')renderDash();else if(tab==='entry')renderList();else if(tab==='report')renderReport();else if(tab==='pending')renderPending();else if(tab==='inc')renderInc();else if(tab==='rep')renderRep();else renderMonth();
   if(RO){document.body.classList.add('ro');$('#warn').innerHTML='<div class="warn">View-only access: you can look at the data and download reports, but you cannot change anything.</div>';document.querySelectorAll('#report .card:not(:first-child) :is(input,select,button)').forEach(e=>{e.disabled=true})}
 }
-(async()=>{
+async function start(session){
+  const role=(session.user.app_metadata||{}).role||'';
+  if(role!=='editor'&&role!=='viewer'){await sb.auth.signOut();return showLogin('This account has no access yet. Ask the owner to give it the editor or viewer role.')}
+  RO=role!=='editor';$('#warn').innerHTML='';
   buildEntry();render();
-  try{if(window.claude){db=await claude.use('db');dl=await claude.use('downloads')}}catch(e){db=null}
-  try{const u=await claude.use('user');RO=!!u&&u.can('data.write')===false}catch(e){}
-  if(db){
-    const err=e=>oops(e);
-    ['entries','expenses'].forEach(c=>db.collection(c).onSnapshot(s=>{S[c]=s.docs.map(d=>({id:d.id,...d.data()}));$('#f-inv')&&!$('#f-inv').value&&($('#f-inv').value=nextInv());render()},err));
-    db.collection('days').onSnapshot(s=>{D={};s.docs.forEach(d=>D[d.id]=d.data());render()},err);
-  }else $('#warn').innerHTML='<div class="warn">Not signed in: entries are kept only until you close this page. Open it from your claude.ai account to save data permanently.</div>';
+  await Promise.all(['entries','expenses','days'].map(load));
+  ['entries','expenses','days'].forEach(t=>sb.channel('live-'+t).on('postgres_changes',{event:'*',schema:'public',table:t},()=>loadSoon(t)).subscribe());
+}
+(async()=>{
+  if(!sb){$('#warn').innerHTML='<div class="warn">Supabase is not set up yet (or its script could not load). Open index.html and fill in SUPABASE_URL and SUPABASE_KEY at the top of the script.</div>';return}
+  const {data:{session}}=await sb.auth.getSession();
+  session?start(session):showLogin();
 })();
 </script></body></html>
