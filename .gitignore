@@ -1,0 +1,7 @@
+# Never commit business data (sales, customers, expenses, advances)
+backup/
+*.csv
+*.xlsx
+*.pdf
+*.json
+.DS_Store
