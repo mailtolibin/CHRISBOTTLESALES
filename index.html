@@ -1,5 +1,7 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="en">
+<head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Chris Bottle Crafters – Daily Sale Manager</title>
 <style>
@@ -30,7 +32,7 @@ tfoot td,tr.t td{font-weight:700}
 #modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:12px;z-index:9}
 #modal .card{max-width:420px;width:100%;margin:0}
 .warn{background:var(--bd);padding:8px 12px;border-radius:8px;margin-bottom:10px;font-size:13px}
-.pshow{display:none}.ro .wr{display:none!important}
+.pshow{display:none}
 @media print{
  html:root:not([data-theme="zz"]){--bg:#fff;--fg:#000;--card:#fff;--mut:#444;--bd:#bbb;--bad:#000;color-scheme:light}
  nav,#warn,button,.noprint,#modal,.help,#report>.card:first-child,#inc>.card:first-child,#month>.card:first-child,#dash>.card:first-child{display:none!important}
@@ -40,446 +42,127 @@ tfoot td,tr.t td{font-weight:700}
  input,select{border:0;background:none;padding:0;appearance:none}
 }
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script></head><body><div class="wrap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+<div class="wrap">
 <h1>Chris Bottle Crafters – Daily Sale Manager</h1>
-<div id="warn"></div><div id="phead" class="pshow"></div>
+<div id="warn"></div>
+<div id="phead" class="pshow"></div>
 <nav id="nav"></nav>
-<section id="dash"></section><section id="entry"></section><section id="report" hidden></section><section id="pending" hidden></section><section id="rep" hidden></section><section id="inc" hidden></section><section id="month" hidden></section>
+<section id="dash"></section>
+<section id="entry"></section>
+<section id="report" hidden></section>
+<section id="pending" hidden></section>
+<section id="rep" hidden></section>
+<section id="inc" hidden></section>
+<section id="month" hidden></section>
 <div id="toast" style="display:none;position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:8px;z-index:10;font-size:14px"></div>
 <div id="modal"><div class="card" id="mbox"></div></div>
 </div>
+
 <script>
-/* ======== SUPABASE SETTINGS – paste your own two values (Supabase > Project Settings > API Keys) ========
-   Use the PUBLISHABLE key (sb_publishable_...) or the legacy anon key. NEVER use a secret / service_role key here. */
-const SUPABASE_URL='https://hscthdlawgutffetphmp.supabase.co';
-const SUPABASE_KEY='sb_publishable_1soI-v725uPW7FLkGjfdZg_tvkwdfJB';
-/* ======================================================================================================== */
-const STAFF=['GE VARGHESE','ABI','NISHANTH','ANANDHU','ANANDHU NEW','SOUMYA','ARYA','ANNA','APPU'];
-const MODES=['CASH','DLAKSHMI','G PAY','PHPAY','YB POS','CARD','YB ACCOUNT','HDFC','PAID EARLIER','NP'];
-const TABS=[['dash','Dashboard'],['entry','Entry'],['report','Day report'],['pending','Pending bills'],['inc','Incentive'],['month','Month'],['rep','Report']];
-const S={entries:[],expenses:[]};let D={},RO=false,tab='dash';
-const $=s=>document.querySelector(s),fmt=n=>new Intl.NumberFormat('en-IN').format(Math.round(n||0));
-const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const today=()=>{const d=new Date();return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
-let day=today(),month=today().slice(0,7);
-const opts=a=>a.map(x=>`<option>${x}</option>`).join('');
-function note(msg){const t=$('#toast');t.textContent=msg;t.style.display='block';clearTimeout(note.t);note.t=setTimeout(()=>t.style.display='none',6000)}
-function ask(msg,fn){$('#mbox').innerHTML=`<h2>${esc(msg)}</h2><div style="display:flex;gap:8px;margin-top:10px"><button class="p" id="yes">Yes, delete</button><button class="s" onclick="$('#modal').style.display='none'">Cancel</button></div>`;$('#modal').style.display='flex';$('#yes').onclick=()=>{$('#modal').style.display='none';fn()}}
-const oops=e=>note('Could not save: '+((e&&e.message)||e));
-/* ---- data layer: Supabase (PostgreSQL) ---- */
-const sb=(window.supabase&&!SUPABASE_URL.includes('YOUR-'))?window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY):null;
-const num=v=>(v===''||v==null||isNaN(+v))?null:+v;
-const DAYF=['ob','drinks','other'];
-async function fetchAll(c){ /* Supabase returns max 1000 rows per request, so read in pages */
-  const out=[],ord=c==='days'?'day':'created_at';
-  for(let from=0;;from+=1000){
-    let q=sb.from(c).select('*').order(ord);if(c!=='days')q=q.order('id');
-    const {data,error}=await q.range(from,from+999);if(error)throw error;
-    out.push(...data);if(data.length<1000)break}
-  return out}
-async function load(c){
-  try{const rows=await fetchAll(c);
-    if(c==='days'){D={};rows.forEach(r=>{const o={};DAYF.forEach(k=>{if(r[k]!=null)o[k]=r[k]});D[r.day]=o})}
-    else{S[c]=rows;$('#f-inv')&&!$('#f-inv').value&&($('#f-inv').value=nextInv())}
-    render()}catch(e){note('Could not load '+c+': '+((e&&e.message)||e))}}
-const T_={};const loadSoon=c=>{clearTimeout(T_[c]);T_[c]=setTimeout(()=>load(c),250)};
-async function add(c,o){try{const {data,error}=await sb.from(c).insert(o).select().single();if(error)throw error;if(!S[c].some(x=>x.id===data.id))S[c].push(data);render()}catch(e){oops(e)}}
-async function upd(c,id,o){try{const {data,error}=await sb.from(c).update(o).eq('id',id).select().single();if(error)throw error;Object.assign(S[c].find(x=>x.id===id)||{},data);render()}catch(e){oops(e)}}
-async function del(c,id){try{const {error,count}=await sb.from(c).delete({count:'exact'}).eq('id',id);if(error)throw error;if(!count)throw new Error('not allowed, or already deleted');S[c]=S[c].filter(x=>x.id!==id);render()}catch(e){oops(e)}}
-async function setDay(d,o){try{const m={...(D[d]||{}),...o},row={day:d,ob:num(m.ob),drinks:num(m.drinks),other:num(m.other)};
-  const {error}=await sb.from('days').upsert(row);if(error)throw error;
-  const n={};DAYF.forEach(k=>{if(row[k]!=null)n[k]=row[k]});D[d]=n;render()}catch(e){oops(e)}}
-/* downloads: plain browser download (replaces the claude.ai 'downloads' service) */
-const dl={save:async({filename,data})=>{
-  const type=filename.endsWith('.pdf')?'application/pdf':filename.endsWith('.json')?'application/json':'text/csv;charset=utf-8';
-  const blob=new Blob([filename.endsWith('.csv')?['\ufeff',data]:[data]].flat(),{type});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;document.body.appendChild(a);a.click();a.remove();
-  setTimeout(()=>URL.revokeObjectURL(a.href),5000)}};
-/* login / logout */
-function showLogin(msg){$('#warn').innerHTML=`<div class="card" style="max-width:360px;margin:20px auto"><h2>Sign in</h2><label>Email</label><input id="lg-email" type="email" autocomplete="username"><label style="margin-top:8px">Password</label><input id="lg-pass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"><div style="margin-top:12px"><button class="p" onclick="doLogin()">Sign in</button></div>${msg?`<div class="warn" style="margin-top:10px">${esc(msg)}</div>`:''}</div>`}
-async function doLogin(){const {data,error}=await sb.auth.signInWithPassword({email:$('#lg-email').value.trim(),password:$('#lg-pass').value});if(error)return showLogin(error.message);start(data.session)}
-async function signOut(){await sb.auth.signOut();location.reload()}
-/* backup / restore (JSON) – also used to move old data in from the claude.ai version */
-async function exportAll(){const strip=({id,created_at,...r})=>r;
-  await dl.save({filename:'backup-'+today()+'.json',data:JSON.stringify({app:'daily-sale-manager',version:1,exported:new Date().toISOString(),entries:S.entries.map(strip),expenses:S.expenses.map(strip),days:D},null,1)})}
-async function importAll(inp){
-  const f=inp.files[0];inp.value='';if(!f)return;
-  if(RO)return note('View-only access: restore is not allowed.');
-  try{const j=JSON.parse(await f.text()),t=v=>v==null?'':String(v);
-    if((S.entries.length||S.expenses.length)&&!confirm('This database already has data. Restoring a backup on top of it can create duplicates. Continue?'))return;
-    const E=(j.entries||[]).slice().sort((a,b)=>(a.ts||0)-(b.ts||0)).map(e=>({date:e.date,type:e.type,inv:t(e.inv),staff:t(e.staff),st:t(e.st),cust:t(e.cust),amt:+e.amt||0,mode:t(e.mode),bill:+e.bill||0,settled:!!e.settled,ts:e.ts||null}));
-    const X=(j.expenses||[]).map(x=>({date:x.date,cat:t(x.cat),item:t(x.item),amt:+x.amt||0,type:t(x.type),src:t(x.src),staff:t(x.staff)}));
-    const Y=Object.entries(j.days||{}).map(([d,v])=>({day:d,ob:num(v.ob),drinks:num(v.drinks),other:num(v.other)}));
-    for(const [tb,rows] of [['entries',E],['expenses',X],['days',Y]])for(let i=0;i<rows.length;i+=500){
-      const part=rows.slice(i,i+500),{error}=await(tb==='days'?sb.from(tb).upsert(part):sb.from(tb).insert(part));if(error)throw error}
-    await Promise.all(['entries','expenses','days'].map(load));
-    note('Restored '+E.length+' entries, '+X.length+' expenses, '+Y.length+' day records.')}catch(e){oops(e)}}
+// ==========================================
+// SUPABASE CREDENTIALS
+// ==========================================
+const SUPABASE_URL = 'https://hscthdlawgutffetphmp.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_1soI-v725uPW7FLkGjfdZg_tvkwdfJB';
 
-/* ---- business rules ----
- SALE: cash received + incentive.  ADV: cash received, NO incentive.
- INV: incentive only, no cash.      NP: not paid, ignored.            */
-const live=e=>e.mode!=='NP'&&e.mode!=='PAID EARLIER';
-function stats(date){
-  const m={},st={};let rs=0,ws=0,cash=0;
-  S.entries.filter(e=>e.date===date&&live(e)).forEach(e=>{
-    const a=+e.amt||0;
-    if(e.type!=='INV'&&e.mode!=='PAID EARLIER'){(m[e.mode]=m[e.mode]||{RS:0,WS:0})[e.st]+=a;e.st==='RS'?rs+=a:ws+=a;if(e.mode==='CASH')cash+=a}
-    const s=st[e.staff]=st[e.staff]||{RS:0,WS:0,adv:0};
-    if(e.type==='ADV')s.adv+=a;else s[e.st]+=a;
-  });
-  return {m,st,rs,ws,cash,total:rs+ws};
-}
-function closings(){
-  const ds=[...new Set([...S.entries.map(e=>e.date),...S.expenses.map(x=>x.date),...Object.keys(D)])].sort();
-  const out={};let prev=0;
-  ds.forEach(d=>{const s=stats(d),dd=D[d]||{};
-    const exp=S.expenses.filter(x=>x.date===d&&cashSrc(x)).reduce((a,x)=>a+(+x.amt||0),0);
-    const ob=(dd.ob!==undefined&&dd.ob!=='')?+dd.ob:prev;
-    const cl=ob+s.cash-exp+(+dd.drinks||0)+(+dd.other||0);
-    out[d]={ob,exp,cl,s};prev=cl});
-  return out;
-}
-function groups(){
-  const g={};
-  S.entries.filter(e=>!e.settled&&((e.type==='ADV'&&live(e))||(e.type==='SALE'&&e.mode==='NP'))).forEach(e=>{
-    const k=e.inv?e.inv+'|'+e.staff:'id'+e.id;
-    const x=g[k]=g[k]||{k,inv:e.inv,staff:e.staff,st:e.st,cust:'',bill:0,paid:0,np:0,ids:[]};
-    if(e.mode==='NP')x.np+=+e.amt||0;else{x.bill=Math.max(x.bill,+e.bill||0);x.paid+=+e.amt||0}
-    x.ids.push(e.id);if(e.cust)x.cust=e.cust});
-  return Object.values(g).map(x=>({...x,bill:Math.max(x.bill,x.paid+x.np)}));
-}
-const nextInv=()=>{const n=S.entries.map(e=>parseInt(e.inv)).filter(x=>x>0);return n.length?Math.max(...n)+1:''};
-
-/* ---- Entry tab ---- */
-function lineHTML(){return `<div class="ln"><input type="number" class="la" min="0" placeholder="Amount ₹" inputmode="numeric"><select class="lm">${opts(MODES)}</select><button class="s" onclick="this.parentNode.remove()">×</button></div>`}
-function buildEntry(){
-  $('#entry').innerHTML=`<div class="card noprint wr"><h2>New bill entry</h2>
-  <div class="grid">
-   <div><label>Date</label><input type="date" id="f-date" value="${day}" onchange="day=this.value;render()"></div>
-   <div><label>Type</label><select id="f-type" onchange="typeChg()"><option>SALE</option><option>ADV</option><option>INV</option></select></div>
-   <div><label>Invoice no.</label><input id="f-inv" inputmode="numeric"></div>
-   <div><label>Salesperson</label><select id="f-staff"><option value="">Select…</option>${opts(STAFF)}</select></div>
-   <div><label>Retail / Wholesale</label><select id="f-st"><option value="RS">Retail</option><option value="WS">Wholesale</option></select></div>
-   <div><label>Customer / remark</label><input id="f-cust"></div>
-   <div id="billbox" hidden><label>Full bill amount ₹</label><input type="number" id="f-bill" inputmode="numeric"></div>
-  </div>
-  <div style="margin-top:10px"><label id="paylbl">Payments received (split between modes if needed)</label><div id="lines">${lineHTML()}</div>
-  <button class="s" id="addln" onclick="$('#lines').insertAdjacentHTML('beforeend',lineHTML())">+ Add payment mode</button></div>
-  <div style="margin-top:12px"><button class="p" onclick="save()">Save entry</button></div>
-  <div class="help"><b>SALE</b> = full amount received now: counts in the daily sale and the salesman’s incentive. <b>ADV</b> = advance or part payment: counts in the daily cash received but <u>not</u> in the incentive; it appears under Pending bills. <b>INV</b> = incentive only, no cash. When the customer pays the balance, use <b>Pending bills → Settle</b>: the last payment is recorded as SALE and the earlier advances as INV, so the incentive gets the full bill. Mode <b>PAID EARLIER</b> = this part was already counted in the daily sale and the incentive on an earlier day, so it is <u>not</u> added again to either. Mode <b>NP</b> = bill not paid: it is not counted in the sale or incentive, and goes to Pending bills automatically.</div></div>
-  <div class="card"><div id="dayhead"></div><div class="sc" id="elist"></div></div>`;
-  $('#f-inv').value=nextInv();
-}
-function typeChg(){const t=$('#f-type').value;$('#billbox').hidden=t!=='ADV';
-  document.querySelectorAll('#lines .lm').forEach(s=>s.hidden=t==='INV');
-  $('#paylbl').textContent=t==='INV'?'Amount counted for incentive (no cash)':'Payments received (split between modes if needed)';
-  $('#addln').hidden=t==='INV'}
-async function save(){
-  const t=$('#f-type').value,date=$('#f-date').value,staff=$('#f-staff').value,st=$('#f-st').value,inv=$('#f-inv').value.trim(),cust=$('#f-cust').value.trim(),bill=+$('#f-bill').value||0;
-  const L=[...document.querySelectorAll('#lines .ln')].map(l=>({amt:+l.querySelector('.la').value,mode:t==='INV'?'-':l.querySelector('.lm').value})).filter(l=>l.amt>0);
-  if(!date||!staff||!L.length)return note('Please choose the date and salesperson, and enter an amount.');
-  if(t==='ADV'){const sum=L.reduce((a,l)=>a+l.amt,0);if(!bill||bill<sum)return note('Enter the full bill amount (it must be at least the advance paid).')}
-  for(const l of L)await add('entries',{date,type:t,inv,staff,st,cust,amt:l.amt,mode:l.mode,bill:t==='ADV'?bill:0,settled:false,ts:Date.now()});
-  day=date;$('#lines').innerHTML=lineHTML();typeChg();$('#f-bill').value='';$('#f-cust').value='';$('#f-inv').value=nextInv();
-}
-function renderList(){
-  const s=stats(day),L=S.entries.filter(e=>e.date===day).sort((a,b)=>(a.ts||0)-(b.ts||0));
-  $('#dayhead').innerHTML=`<h2>Entries for ${day}</h2><div class="mut">Received today: Retail ₹${fmt(s.rs)} · Wholesale ₹${fmt(s.ws)} · <b>Total ₹${fmt(s.total)}</b> · ${L.length} rows</div>`;
-  $('#elist').innerHTML=L.length?`<table><thead><tr><th>Inv</th><th>Type</th><th>Staff</th><th>R/W</th><th>Customer</th><th>Mode</th><th>Amount</th><th></th></tr></thead><tbody>${L.map(e=>`<tr><td>${esc(e.inv)}</td><td><span class="tag">${e.type}</span></td><td>${esc(e.staff)}</td><td>${e.st}</td><td>${esc(e.cust)}</td><td>${esc(e.mode)}${e.mode==='NP'&&!e.settled?' <span class="tag">in pending</span>':''}</td><td>${fmt(e.amt)}</td><td><span class="wr"><button class="s" onclick="openEdit('${e.id}')">Edit</button> <button class="s" onclick="ask('Delete this entry?',()=>del('entries','${e.id}'))">Delete</button></span></td></tr>`).join('')}</tbody></table>`:'<div class="mut">No entries yet for this date.</div>';
-}
-
-function openEdit(id){
-  const e=S.entries.find(x=>x.id===id);if(!e)return;
-  const sel=(a,v)=>a.map(x=>`<option${x===v?' selected':''}>${esc(x)}</option>`).join('');
-  $('#mbox').innerHTML=`<h2>Edit entry</h2><div class="grid">
-  <div><label>Date</label><input type="date" id="e-date" value="${e.date}"></div>
-  <div><label>Type</label><select id="e-type">${sel(['SALE','ADV','INV'],e.type)}</select></div>
-  <div><label>Invoice no.</label><input id="e-inv" value="${esc(e.inv)}"></div>
-  <div><label>Salesperson</label><select id="e-staff">${sel([...new Set([...STAFF,e.staff])],e.staff)}</select></div>
-  <div><label>Retail / Wholesale</label><select id="e-st"><option value="RS"${e.st==='RS'?' selected':''}>Retail</option><option value="WS"${e.st==='WS'?' selected':''}>Wholesale</option></select></div>
-  <div><label>Customer / remark</label><input id="e-cust" value="${esc(e.cust)}"></div>
-  <div><label>Payment mode</label><select id="e-mode">${sel([...MODES,'-'],e.mode)}</select></div>
-  <div><label>Amount ₹</label><input type="number" id="e-amt" value="${e.amt}"></div>
-  <div><label>Full bill ₹ (ADV only)</label><input type="number" id="e-bill" value="${e.bill||''}"></div></div>
-  <div style="margin-top:10px;display:flex;gap:8px"><button class="p" onclick="saveEdit('${id}')">Save changes</button><button class="s" onclick="$('#modal').style.display='none'">Cancel</button></div>`;
-  $('#modal').style.display='flex';
-}
-async function saveEdit(id){
-  const t=$('#e-type').value,amt=+$('#e-amt').value,bill=+$('#e-bill').value||0;
-  if(!$('#e-date').value||!amt)return note('Date and amount are required.');
-  if(t==='ADV'&&bill<amt)return note('The full bill amount must be at least the advance paid.');
-  await upd('entries',id,{date:$('#e-date').value,type:t,inv:$('#e-inv').value.trim(),staff:$('#e-staff').value,st:$('#e-st').value,cust:$('#e-cust').value.trim(),mode:$('#e-mode').value,amt,bill:t==='ADV'?bill:0});
-  $('#modal').style.display='none';
-}
-/* ---- Day report ---- */
-function renderReport(){
-  const C=closings(),dd=D[day]||{};let c=C[day];
-  if(!c){const prev=Object.keys(C).filter(d=>d<day).sort().pop();c={ob:prev?C[prev].cl:0,exp:0,cl:0,s:stats(day)};c.cl=c.ob}
-  const s=c.s,X=S.expenses.filter(x=>x.date===day);
-  const rows=MODES.filter(m=>m!=='NP'&&s.m[m]).map(m=>`<tr><td>${m}</td><td>${fmt(s.m[m].RS)}</td><td>${fmt(s.m[m].WS)}</td><td>${fmt(s.m[m].RS+s.m[m].WS)}</td></tr>`).join('');
-  const sr=Object.keys(s.st).sort().map(n=>{const a=s.st[n];return `<tr><td>${esc(n)}</td><td>${fmt(a.RS)}</td><td>${fmt(a.WS)}</td><td>${fmt(a.RS+a.WS)}</td><td>${fmt(a.adv)}</td></tr>`}).join('');
-  $('#report').innerHTML=`<div class="card"><label>Date</label><input type="date" value="${day}" style="max-width:200px" onchange="day=this.value;render()"></div>
-  <div class="grid"><div class="card"><div class="mut">Retail received</div><div class="kpi">₹${fmt(s.rs)}</div></div><div class="card"><div class="mut">Wholesale received</div><div class="kpi">₹${fmt(s.ws)}</div></div><div class="card"><div class="mut">Total sale for the day</div><div class="kpi">₹${fmt(s.total)}</div></div></div>
-  <div class="card"><h2>Payment modes</h2><div class="sc"><table><thead><tr><th>Mode</th><th>Retail</th><th>Wholesale</th><th>Total</th></tr></thead><tbody>${rows||'<tr><td colspan="4" class="mut">No payments</td></tr>'}</tbody><tfoot><tr><td>Total</td><td>${fmt(s.rs)}</td><td>${fmt(s.ws)}</td><td>${fmt(s.total)}</td></tr></tfoot></table></div></div>
-  ${incCard(s,'RS','Retail incentive – per salesperson')}${incCard(s,'WS','Wholesale incentive – per salesperson')}
-  <div class="card"><h2>Cash count</h2><div class="grid">
-   <div><label>Opening balance ₹ ${dd.ob===undefined||dd.ob===''?'(auto: previous closing)':'(entered)'}</label><input type="number" value="${dd.ob===undefined?'':dd.ob}" placeholder="${fmt(c.ob)}" onchange="setDay(day,{ob:this.value})"></div>
-   <div><label>Cool drinks ₹</label><input type="number" value="${dd.drinks||''}" onchange="setDay(day,{drinks:this.value})"></div>
-   <div><label>Other income ₹</label><input type="number" value="${dd.other||''}" onchange="setDay(day,{other:this.value})"></div></div>
-   <div class="sc" style="margin-top:8px"><table><tbody>
-   <tr><td>Opening balance</td><td>${fmt(c.ob)}</td></tr><tr><td>Cash received (CASH mode)</td><td>${fmt(s.cash)}</td></tr>
-   <tr><td>Expenses paid from cash in hand</td><td>− ${fmt(X.filter(cashSrc).reduce((a,x)=>a+(+x.amt||0),0))}</td></tr><tr><td>Drinks + other income</td><td>${fmt((+dd.drinks||0)+(+dd.other||0))}</td></tr>
-   <tr class="t"><td>Cash in hand</td><td class="kpi">₹${fmt(c.ob+s.cash-X.filter(cashSrc).reduce((a,x)=>a+(+x.amt||0),0)+(+dd.drinks||0)+(+dd.other||0))}</td></tr></tbody></table></div>
-   <h2 style="margin-top:12px">Expenses</h2><div class="mut">Company ₹${fmt(xsum(X,'COMP'))} · Personal ₹${fmt(xsum(X,'PERS'))} · Advance ₹${fmt(xsum(X,'ADV'))} · Total ₹${fmt(xsum(X,'COMP')+xsum(X,'PERS')+xsum(X,'ADV'))}</div><div class="mut">Paid from: ${SRCS.map(s=>s+' ₹'+fmt(srcSum(X,s))).join(' · ')}</div><div class="mut">By category: ${catLine(X)}</div>
-   ${X.map(x=>`<div class="ln"><span style="flex:2">${esc(x.cat?x.cat+(x.item?' – '+x.item:''):x.item)}${x.type==='ADV'?' – '+esc(x.staff||'(no staff)'):''}</span>${x.type==='ADV'?'':`<select style="flex:1" onchange="upd('expenses','${x.id}',{cat:this.value})"><option value="">Category…</option>${CATS.map(c=>`<option${c===x.cat?' selected':''}>${c}</option>`).join('')}</select>`}<select style="flex:1" onchange="upd('expenses','${x.id}',{type:this.value})"><option value="COMP"${(x.type==='PERS'||x.type==='ADV')?'':' selected'}>Company</option><option value="PERS"${x.type==='PERS'?' selected':''}>Personal</option><option value="ADV"${x.type==='ADV'?' selected':''}>Advance</option></select>${x.type==='ADV'?`<select style="flex:1" onchange="upd('expenses','${x.id}',{staff:this.value})"><option value="">Staff…</option>${STAFF.map(n=>`<option${n===x.staff?' selected':''}>${n}</option>`).join('')}</select>`:''}<select style="flex:1" onchange="upd('expenses','${x.id}',{src:this.value})">${SRCS.map(s=>`<option${(x.src||'CASH IN HAND')===s?' selected':''}>${s}</option>`).join('')}</select><span style="flex:1;text-align:right">${fmt(x.amt)}</span><button class="s" onclick="ask('Delete this expense?',()=>del('expenses','${x.id}'))">×</button></div>`).join('')}
-   <div class="ln wr"><select id="x-cat"><option value="">Category?</option>${opts(CATS)}</select><input id="x-item" placeholder="Note (optional)"><select id="x-type" onchange="xType()"><option value="">Type?</option><option value="COMP">Company</option><option value="PERS">Personal</option><option value="ADV">Advance</option></select><select id="x-staff" hidden><option value="">Staff…</option>${opts(STAFF)}</select><select id="x-src"><option value="">Paid from?</option>${opts(SRCS)}</select><input id="x-amt" type="number" placeholder="Amount ₹"><button class="s" onclick="addExp()">Add</button></div></div>`;
-}
-const xsum=(L,t)=>L.filter(x=>t==='PERS'?x.type==='PERS':t==='ADV'?x.type==='ADV':(x.type!=='PERS'&&x.type!=='ADV')).reduce((a,x)=>a+(+x.amt||0),0);
-const SRCS=['CASH IN HAND','DLAKSHMI','CUPBOARD','ANNA'];
-const cashSrc=x=>!x.src||x.src==='CASH IN HAND';
-const CATS=['RENT','WATER','LABOUR','BATA','OVERTIME','STATIONERY','DONATION','PARTY FUND','DIESEL (PICKUP)','OTHER'];
-const ALLC=[...CATS,'ADVANCE',''];
-const catSum=(L,c)=>L.filter(x=>(x.cat||'')===c).reduce((a,x)=>a+(+x.amt||0),0);
-const catLine=L=>{const r=ALLC.filter(c=>catSum(L,c)).map(c=>(c||'NO CATEGORY')+' ₹'+fmt(catSum(L,c)));return r.length?r.join(' · '):'none'};
-function catTable(m){const L=S.expenses.filter(x=>x.date.startsWith(m)),rows=ALLC.filter(c=>catSum(L,c));
-  return `<div class="sc"><table><thead><tr><th>Category</th><th>Amount</th></tr></thead><tbody>${rows.map(c=>`<tr><td>${c||'NO CATEGORY'}</td><td>${fmt(catSum(L,c))}</td></tr>`).join('')||'<tr><td colspan="2" class="mut">No expenses</td></tr>'}</tbody><tfoot><tr><td>Total (all types)</td><td>${fmt(L.reduce((a,x)=>a+(+x.amt||0),0))}</td></tr></tfoot></table></div>`}
-const srcSum=(L,s)=>L.filter(x=>(x.src||'CASH IN HAND')===s).reduce((a,x)=>a+(+x.amt||0),0);
-function xType(){const a=$('#x-type').value==='ADV';$('#x-staff').hidden=!a;$('#x-cat').hidden=a}
-function addExp(){const type=$('#x-type').value,staff=$('#x-staff').value,src=$('#x-src').value,amt=+$('#x-amt').value;let cat=$('#x-cat').value,item=$('#x-item').value.trim();
-  if(!type)return note('Choose the expense type: Company, Personal or Advance.');
-  if(!src)return note('Choose how it was paid: Cash in hand, Dlakshmi, Cupboard or Anna.');
-  if(type==='ADV'){if(!staff)return note('Choose the staff member who received the advance.');cat='ADVANCE'}else if(!cat)return note('Choose the expense category.');
-  if(!amt)return note('Enter the amount.');
-  add('expenses',{date:day,cat,item,amt,type,src,staff:type==='ADV'?staff:''})}
-function advTable(m){const A=S.expenses.filter(x=>x.type==='ADV'),nm=x=>x.staff||'(no staff)',names=[...new Set(A.map(nm))].sort(),s=l=>l.reduce((a,x)=>a+(+x.amt||0),0);
-  if(!names.length)return '<div class="mut">No staff advances recorded.</div>';
-  return `<div class="sc"><table><thead><tr><th>Staff</th><th>This month</th><th>Total given</th></tr></thead><tbody>${names.map(n=>{const l=A.filter(x=>nm(x)===n);return `<tr><td>${esc(n)}</td><td>${fmt(s(l.filter(x=>x.date.startsWith(m))))}</td><td>${fmt(s(l))}</td></tr>`}).join('')}</tbody><tfoot><tr><td>Total</td><td>${fmt(s(A.filter(x=>x.date.startsWith(m))))}</td><td>${fmt(s(A))}</td></tr></tfoot></table></div>`}
-function expMonth(){const L=S.expenses.filter(x=>x.date.startsWith(month)),ds=[...new Set(L.map(x=>x.date))].sort();
-  return `<div class="sc"><table><thead><tr><th>Date</th><th>Company</th><th>Personal</th><th>Total</th></tr></thead><tbody>${ds.map(d=>{const l=L.filter(x=>x.date===d),c=xsum(l,'COMP'),p=xsum(l,'PERS');return `<tr><td>${d}</td><td>${fmt(c)}</td><td>${fmt(p)}</td><td>${fmt(c+p)}</td></tr>`}).join('')||'<tr><td colspan="4" class="mut">No expenses</td></tr>'}</tbody><tfoot><tr><td>Month total</td><td>${fmt(xsum(L,'COMP'))}</td><td>${fmt(xsum(L,'PERS'))}</td><td>${fmt(xsum(L,'COMP')+xsum(L,'PERS'))}</td></tr></tfoot></table></div><div class="mut" style="margin-top:6px">Paid from (all expense types): ${SRCS.map(s=>s+' ₹'+fmt(srcSum(L,s))).join(' · ')}</div>`}
-
-/* ---- Pending bills ---- */
-function renderPending(){
-  const G=groups();
-  $('#pending').innerHTML=`<div class="card"><h2>Pending bills (advance taken, balance not yet paid)</h2><div class="sc">${G.length?`<table><thead><tr><th>Inv</th><th>Customer</th><th>Staff</th><th>Bill</th><th>Advance</th><th>Balance</th><th></th></tr></thead><tbody>${G.map(g=>`<tr><td>${esc(g.inv)}</td><td>${esc(g.cust)}</td><td>${esc(g.staff)}</td><td>${fmt(g.bill)}</td><td>${fmt(g.paid)}</td><td class="bad">${fmt(g.bill-g.paid)}</td><td><button class="s wr" onclick="openSettle('${g.k.replace(/'/g,'')}')">Settle</button></td></tr>`).join('')}</tbody><tfoot><tr><td colspan="5">Total pending</td><td class="bad">${fmt(G.reduce((a,g)=>a+g.bill-g.paid,0))}</td><td></td></tr></tfoot></table>`:'<div class="mut">No pending bills.</div>'}</div></div>`;
-}
-function openSettle(k){
-  const g=groups().find(x=>x.k===k);if(!g)return;const bal=g.bill-g.paid;
-  $('#mbox').innerHTML=`<h2>Settle invoice ${esc(g.inv)} – ${esc(g.cust)}</h2><div class="mut">Bill ₹${fmt(g.bill)} · advances ₹${fmt(g.paid)} · balance ₹${fmt(bal)}</div>
-  <div id="mlines">${lineHTML()}</div><button class="s" onclick="$('#mlines').insertAdjacentHTML('beforeend',lineHTML())">+ Add payment mode</button>
-  <div class="help">Records the last payment as SALE (today’s daily sale + incentive) and the earlier advances as INV (incentive only), so the salesman gets the full bill amount.</div>
-  <div style="margin-top:10px;display:flex;gap:8px"><button class="p" onclick="doSettle('${k.replace(/'/g,'')}')">Confirm</button><button class="s" onclick="$('#modal').style.display='none'">Cancel</button></div>`;
-  $('#mlines .la').value=bal;$('#modal').style.display='flex';
-}
-async function doSettle(k){
-  const g=groups().find(x=>x.k===k);if(!g)return;const bal=g.bill-g.paid;
-  const L=[...document.querySelectorAll('#mlines .ln')].map(l=>({amt:+l.querySelector('.la').value,mode:l.querySelector('.lm').value})).filter(l=>l.amt>0);
-  if(Math.abs(L.reduce((a,l)=>a+l.amt,0)-bal)>0.5)return note('The last payment must equal the balance ₹'+fmt(bal)+'. For a part payment, add another ADV entry instead.');
-  const date=today(),base={date,inv:g.inv,staff:g.staff,st:g.st,cust:g.cust,bill:0,settled:true,ts:Date.now()};
-  for(const l of L)await add('entries',{...base,type:'SALE',amt:l.amt,mode:l.mode});
-  if(g.paid>0)await add('entries',{...base,type:'INV',amt:g.paid,mode:'-'});
-  for(const id of g.ids)await upd('entries',id,{settled:true});
-  $('#modal').style.display='none';
-}
-
-/* ---- Month ---- */
-const MM=MODES.filter(m=>m!=='NP'&&m!=='PAID EARLIER');
-function renderMonth(){
-  const ds=[...new Set(S.entries.filter(e=>e.date.startsWith(month)).map(e=>e.date))].sort();
-  const T={rs:0,ws:0,m:{},st:{}};
-  const rows=ds.map(d=>{const s=stats(d);T.rs+=s.rs;T.ws+=s.ws;
-    MM.forEach(m=>T.m[m]=(T.m[m]||0)+(s.m[m]?s.m[m].RS+s.m[m].WS:0));
-    Object.entries(s.st).forEach(([n,a])=>{const t=T.st[n]=T.st[n]||{RS:0,WS:0,adv:0};t.RS+=a.RS;t.WS+=a.WS;t.adv+=a.adv});
-    return {d,s}});
-  $('#month').innerHTML=`<div class="card"><label>Month</label><input type="month" value="${month}" style="max-width:200px" onchange="month=this.value;render()"> <button class="s" onclick="exportCsv()">Download CSV</button> <button class="s" onclick="exportAll()">Backup (all data)</button> <button class="s wr" onclick="$('#rfile').click()">Restore backup</button><input type="file" id="rfile" accept=".json,application/json" hidden onchange="importAll(this)"></div>
-  <div class="grid"><div class="card"><div class="mut">Retail</div><div class="kpi">₹${fmt(T.rs)}</div></div><div class="card"><div class="mut">Wholesale</div><div class="kpi">₹${fmt(T.ws)}</div></div><div class="card"><div class="mut">Total</div><div class="kpi">₹${fmt(T.rs+T.ws)}</div></div><div class="card"><div class="mut">Daily average (${ds.length} days)</div><div class="kpi">₹${fmt(ds.length?(T.rs+T.ws)/ds.length:0)}</div></div></div>
-  <div class="card"><h2>Daily payment record</h2><div class="sc"><table><thead><tr><th>Date</th>${MM.map(m=>`<th>${m}</th>`).join('')}<th>Retail</th><th>Wholesale</th><th>Total</th></tr></thead><tbody>${rows.map(({d,s})=>`<tr><td>${d}</td>${MM.map(m=>`<td>${fmt(s.m[m]?s.m[m].RS+s.m[m].WS:0)}</td>`).join('')}<td>${fmt(s.rs)}</td><td>${fmt(s.ws)}</td><td>${fmt(s.total)}</td></tr>`).join('')}</tbody><tfoot><tr><td>Total</td>${MM.map(m=>`<td>${fmt(T.m[m])}</td>`).join('')}<td>${fmt(T.rs)}</td><td>${fmt(T.ws)}</td><td>${fmt(T.rs+T.ws)}</td></tr></tfoot></table></div></div>
-  <div class="card"><h2>Expenses – month (company and personal; advances are listed separately below)</h2>${expMonth()}</div>
-  <div class="card"><h2>Expenses by category – month</h2>${catTable(month)}</div>
-  <div class="card"><h2>Staff advances</h2>${advTable(month)}</div>
-  <div class="card"><h2>Salesman – month total for incentive</h2><div class="sc"><table><thead><tr><th>Name</th><th>Retail</th><th>Wholesale</th><th>Total</th></tr></thead><tbody>${Object.keys(T.st).sort().map(n=>`<tr><td>${esc(n)}</td><td>${fmt(T.st[n].RS)}</td><td>${fmt(T.st[n].WS)}</td><td>${fmt(T.st[n].RS+T.st[n].WS)}</td></tr>`).join('')}</tbody></table></div></div>`;
-}
-async function exportCsv(){
-  const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
-  const L=S.entries.filter(e=>e.date.startsWith(month)).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:(a.ts||0)-(b.ts||0));
-  const csv=['Date,Type,Inv,Staff,R/W,Customer,Mode,Amount'].concat(L.map(e=>[e.date,e.type,e.inv,e.staff,e.st,e.cust,e.mode,e.amt].map(q).join(','))).join('\n');
-  try{if(!dl)return note('Download is not available in this view.');await dl.save({filename:'sales-'+month+'.csv',data:csv})}catch(e){if(!e||e.code!=='declined')oops(e)}
-}
-
-function incCard(s,k,t){
-  const n=Object.keys(s.st).filter(x=>s.st[x][k]).sort(),tot=n.reduce((a,x)=>a+s.st[x][k],0);
-  return `<div class="card"><h2>${t}</h2><div class="sc"><table><thead><tr><th>Name</th><th>Amount</th></tr></thead><tbody>${n.map(x=>`<tr><td>${esc(x)}</td><td>${fmt(s.st[x][k])}</td></tr>`).join('')||'<tr><td colspan="2" class="mut">No entries</td></tr>'}</tbody><tfoot><tr><td>Total</td><td>${fmt(tot)}</td></tr></tfoot></table></div></div>`;
-}
-function renderInc(){
-  const ds=[...new Set(S.entries.filter(e=>e.date.startsWith(month)).map(e=>e.date))].sort();
-  const names=[...new Set([...STAFF,...S.entries.map(e=>e.staff)])].filter(Boolean);
-  const R=ds.map(d=>({d,s:stats(d)})),g=(r,n,k)=>(r.s.st[n]||{})[k]||0;
-  const tb=(k,t)=>`<div class="card"><h2>${t}</h2><div class="sc"><table><thead><tr><th>Date</th>${names.map(n=>`<th>${esc(n)}</th>`).join('')}<th>Total</th></tr></thead><tbody>${R.map(r=>`<tr><td>${r.d}</td>${names.map(n=>`<td>${fmt(g(r,n,k))}</td>`).join('')}<td>${fmt(names.reduce((a,n)=>a+g(r,n,k),0))}</td></tr>`).join('')}</tbody><tfoot><tr><td>Total</td>${names.map(n=>`<td>${fmt(R.reduce((a,r)=>a+g(r,n,k),0))}</td>`).join('')}<td>${fmt(R.reduce((a,r)=>a+names.reduce((b,n)=>b+g(r,n,k),0),0))}</td></tr></tfoot></table></div></div>`;
-  $('#inc').innerHTML=`<div class="card"><label>Month</label><input type="month" value="${month}" style="max-width:200px" onchange="month=this.value;render()"><div class="help">Retail and wholesale are kept separate for every salesperson. Advances are not counted until the bill is settled.</div></div>`+tb('RS','Retail incentive')+tb('WS','Wholesale incentive');
-}
-function printPage(){
-  const wide=tab==='inc'||tab==='month';
-  let st=$('#pg');if(!st){st=document.createElement('style');st.id='pg';document.head.appendChild(st)}
-  st.textContent='@page{size:A4 '+(wide?'landscape':'portrait')+';margin:10mm}';
-  try{window.print()}catch(e){note('Printing is blocked here. Open the page in its own browser tab and press Ctrl+P.')}
-}
-const TARGET=333333;
-const pbar=(v,mx,c)=>`<div style="background:var(--bd);border-radius:4px;height:7px;min-width:60px"><div style="width:${mx?Math.max(0,Math.min(100,v/mx*100)):0}%;background:${c||'var(--ac)'};height:7px;border-radius:4px"></div></div>`;
-const kpi=(t,v,sub,col)=>`<div class="card" style="margin:0"><div class="mut">${t}</div><div class="kpi"${col?` style="color:${col}"`:''}>${v}</div>${sub?`<div class="mut">${sub}</div>`:''}</div>`;
-function renderDash(){
-  const m=day.slice(0,7),C=closings(),s=stats(day);
-  const pk=Object.keys(C).filter(d=>d<day).sort(),cih=C[day]?C[day].cl:(pk.length?C[pk.pop()].cl:0);
-  const ds=[...new Set(S.entries.filter(e=>e.date.startsWith(m)).map(e=>e.date))].sort(),R=ds.map(d=>({d,s:stats(d)}));
-  const M={rs:0,ws:0,m:{},st:{}};
-  R.forEach(({s})=>{M.rs+=s.rs;M.ws+=s.ws;Object.entries(s.m).forEach(([k,v])=>M.m[k]=(M.m[k]||0)+v.RS+v.WS);Object.entries(s.st).forEach(([n,a])=>{const x=M.st[n]=M.st[n]||{RS:0,WS:0};x.RS+=a.RS;x.WS+=a.WS})});
-  const act=R.filter(r=>r.s.total>0).length,tot=M.rs+M.ws,avg=act?tot/act:0,ok=avg>=TARGET;
-  const xm=S.expenses.filter(x=>x.date.startsWith(m)),xcm=xsum(xm,'COMP'),xpm=xsum(xm,'PERS'),xam=xsum(xm,'ADV');
-  const G=groups().sort((a,b)=>(b.bill-b.paid)-(a.bill-a.paid)),pend=G.reduce((a,g)=>a+g.bill-g.paid,0);
-  const [y,mo]=m.split('-').map(Number),n=new Date(y,mo,0).getDate(),W=620,H=170,pl=36,pb=18,bw=(W-pl)/n;
-  const mx=Math.max(TARGET*1.1,...R.map(r=>r.s.total),1),yv=v=>H-pb-(H-pb-6)*v/mx;
-  let bars='';
-  for(let i=1;i<=n;i++){const d=m+'-'+String(i).padStart(2,'0'),r=R.find(r=>r.d===d),x=pl+(i-1)*bw+1;
-    if(r){const a=r.s.rs,b=r.s.ws;bars+=`<rect x="${x}" y="${yv(a)}" width="${bw-2}" height="${H-pb-yv(a)}" fill="var(--ac)"/><rect x="${x}" y="${yv(a+b)}" width="${bw-2}" height="${yv(a)-yv(a+b)}" fill="#d98a2b"/>`}
-    if(d===day)bars+=`<rect x="${x-1}" y="2" width="${bw}" height="${H-pb-2}" fill="none" stroke="var(--fg)" stroke-width="1"/>`;
-    if(i%2===1||n<=16)bars+=`<text x="${x+bw/2-1}" y="${H-4}" font-size="9" text-anchor="middle" fill="var(--mut)">${i}</text>`}
-  const svg=`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Daily sales for the month"><line x1="${pl}" x2="${W}" y1="${yv(TARGET)}" y2="${yv(TARGET)}" stroke="var(--bad)" stroke-dasharray="4 3"/><text x="2" y="${yv(TARGET)+3}" font-size="9" fill="var(--bad)">Target</text>${bars}</svg>`;
-  const tm={};Object.entries(s.m).forEach(([k,v])=>tm[k]=v.RS+v.WS);
-  const modes=[...new Set([...Object.keys(M.m),...Object.keys(tm)])].sort((a,b)=>(M.m[b]||0)-(M.m[a]||0));
-  const staff=Object.entries(M.st).sort((a,b)=>(b[1].RS+b[1].WS)-(a[1].RS+a[1].WS)),smax=staff.length?staff[0][1].RS+staff[0][1].WS:0;
-  const label=new Date(y,mo-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'});
-  $('#dash').innerHTML=`<div class="card"><label>Dashboard date</label><input type="date" value="${day}" style="max-width:200px" onchange="day=this.value;render()"></div>
-  <h2>Today – ${day}</h2>
-  <div class="grid" style="margin-bottom:12px">${kpi('Retail sale','₹'+fmt(s.rs))}${kpi('Wholesale sale','₹'+fmt(s.ws))}${kpi('Total sale for the day','₹'+fmt(s.total))}${kpi('Cash in hand','₹'+fmt(cih),'after expenses')}</div>
-  <h2>${label}</h2>
-  <div class="grid" style="margin-bottom:12px">${kpi('Retail sale','₹'+fmt(M.rs))}${kpi('Wholesale sale','₹'+fmt(M.ws))}${kpi('Total sale','₹'+fmt(tot),act+' selling days')}${kpi('Daily average','₹'+fmt(avg),'target ₹'+fmt(TARGET)+' · '+(TARGET?Math.round(avg/TARGET*100):0)+'%',ok?'var(--ac)':'var(--bad)')}${kpi('Pending bills','₹'+fmt(pend),G.length+' bills','var(--bad)')}${kpi('Company expense','₹'+fmt(xcm),'this month')}${kpi('Personal expense','₹'+fmt(xpm),'this month')}${kpi('Staff advances','₹'+fmt(xam),'given this month')}</div>
-  <div class="card"><h2>Daily sale – <span style="color:var(--ac)">retail</span> + <span style="color:#d98a2b">wholesale</span></h2>${svg}<div class="mut">Dashed line = daily target ₹${fmt(TARGET)}. Boxed day = selected date.</div></div>
-  <div class="card"><h2>Received by payment mode</h2><div class="sc"><table><thead><tr><th>Mode</th><th>Today</th><th>This month</th><th style="width:30%"></th></tr></thead><tbody>${modes.map(k=>`<tr><td>${esc(k)}</td><td>${fmt(tm[k])}</td><td>${fmt(M.m[k])}</td><td>${pbar(M.m[k]||0,tot)}</td></tr>`).join('')||'<tr><td colspan="4" class="mut">No payments yet</td></tr>'}</tbody></table></div></div>
-  ${pieCard(M)}
-  <div class="card"><h2>Salesperson – month (counted for incentive)</h2><div class="sc"><table><thead><tr><th>Name</th><th>Retail</th><th>Wholesale</th><th>Total</th><th style="width:25%"></th></tr></thead><tbody>${staff.map(([nm,a])=>`<tr><td>${esc(nm)}</td><td>${fmt(a.RS)}</td><td>${fmt(a.WS)}</td><td>${fmt(a.RS+a.WS)}</td><td>${pbar(a.RS+a.WS,smax)}</td></tr>`).join('')||'<tr><td colspan="5" class="mut">No entries yet</td></tr>'}</tbody></table></div></div>
-  <div class="card"><h2>Staff advances</h2>${advTable(m)}</div>
-  <div class="card"><h2>Largest pending balances</h2>${G.length?`<div class="sc"><table><thead><tr><th>Inv</th><th>Customer</th><th>Staff</th><th>Balance</th></tr></thead><tbody>${G.slice(0,5).map(g=>`<tr><td>${esc(g.inv)}</td><td>${esc(g.cust)}</td><td>${esc(g.staff)}</td><td class="bad">${fmt(g.bill-g.paid)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="mut">No pending bills.</div>'}</div>`;
-}
-const REPORTS=[['day','Day report (selected date)'],['bills','Daily sale – bill wise'],['adv','Staff advance statement (month of selected date)'],['incR','Incentive record – RETAIL (month of selected date)'],['incW','Incentive record – WHOLESALE (month of selected date)'],['exp','Expense report (month of selected date)']];
-function renderRep(){
-  $('#rep').innerHTML=`<div class="card"><h2>Reports</h2><div class="mut">Choose a date and a report. It downloads as a PDF that you can open and print on your phone or computer.</div></div>
-  <div class="card"><label>Date</label><input type="date" value="${day}" style="max-width:200px" onchange="day=this.value;render()"><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">${REPORTS.map(r=>`<button class="p" onclick="runReport('${r[0]}')">${r[1]}</button>`).join('')}</div></div>`;
-}
-async function runReport(k){
-  if(k==='adv')return advReport();
-  if(k==='exp')return expReport();
-  if(k==='incR'||k==='incW')return incReport(k==='incR'?'RS':'WS');
-  if(k==='bills')return billReport();
-  if(!window.jspdf)return note('The PDF tool did not load. Check your internet connection and reload the page.');
-  if(!dl)return note('Download is not available in this view.');
-  const doc=new window.jspdf.jsPDF({unit:'mm',format:'a4'}),C=closings(),s=stats(day),dd=D[day]||{},pk=Object.keys(C).filter(d=>d<day).sort();
-  const ob=C[day]?C[day].ob:(pk.length?C[pk.pop()].cl:0),ex=S.expenses.filter(x=>x.date===day),et=ex.reduce((a,x)=>a+(+x.amt||0),0),etc=ex.filter(cashSrc).reduce((a,x)=>a+(+x.amt||0),0);
-  const f=n=>fmt(n);let y=16;
-  doc.setFontSize(14);doc.text('Chris Bottle Crafters - Day Report',14,y);doc.setFontSize(10);doc.text('Date: '+day,14,y+6);y+=14;
-  const sec=(t,head,body,foot)=>{if(y>240){doc.addPage();y=16}doc.setFontSize(11);doc.text(t,14,y);
-    doc.autoTable({startY:y+2,head:[head],body:body.length?body:[['No entries'].concat(head.slice(1).map(()=>''))],foot:foot?[foot]:undefined,theme:'grid',styles:{fontSize:9},headStyles:{fillColor:[31,122,77]},footStyles:{fillColor:[230,230,230],textColor:0},didParseCell:d=>{if(d.column.index>0)d.cell.styles.halign='right'}});
-    y=doc.lastAutoTable.finalY+9};
-  sec('Sale for the day',['','Amount (Rs)'],[['Retail',f(s.rs)],['Wholesale',f(s.ws)]],['Total',f(s.total)]);
-  const md=MODES.filter(m=>s.m[m]);
-  sec('Payment modes',['Mode','Retail','Wholesale','Total'],md.map(m=>[m,f(s.m[m].RS),f(s.m[m].WS),f(s.m[m].RS+s.m[m].WS)]),['Total',f(s.rs),f(s.ws),f(s.total)]);
-  ['RS','WS'].forEach(k2=>{const n=Object.keys(s.st).filter(x=>s.st[x][k2]).sort();
-    sec((k2==='RS'?'Retail':'Wholesale')+' incentive - per salesperson',['Name','Amount (Rs)'],n.map(x=>[x,f(s.st[x][k2])]),['Total',f(n.reduce((a,x)=>a+s.st[x][k2],0))])});
-  sec('Cash count',['','Amount (Rs)'],[['Opening balance',f(ob)],['Cash received',f(s.cash)],['Expenses paid from cash in hand','- '+f(etc)],['Cool drinks',f(+dd.drinks||0)],['Other income',f(+dd.other||0)]],['Cash in hand',f(ob+s.cash-etc+(+dd.drinks||0)+(+dd.other||0))]);
-  if(ex.length){sec('Expenses',['Item','Type','Paid from','Amount (Rs)'],ex.map(x=>[x.cat?x.cat+(x.item?' - '+x.item:''):x.item,x.type==='PERS'?'Personal':x.type==='ADV'?'Advance: '+(x.staff||'-'):'Company',x.src||'CASH IN HAND',f(x.amt)]),['Company '+f(xsum(ex,'COMP'))+' | Personal '+f(xsum(ex,'PERS'))+' | Advance '+f(xsum(ex,'ADV')),'','Total',f(et)]);
-    sec('Expenses by payment source',['Paid from','Amount (Rs)'],SRCS.filter(s=>srcSum(ex,s)).map(s=>[s,f(srcSum(ex,s))]),['Total',f(et)]);
-    sec('Expenses by category',['Category','Amount (Rs)'],ALLC.filter(c=>catSum(ex,c)).map(c=>[c||'NO CATEGORY',f(catSum(ex,c))]),['Total',f(et)])}
-  try{await dl.save({filename:'day-report-'+day+'.pdf',data:doc.output('arraybuffer')})}catch(e){if(!e||e.code!=='declined')oops(e)}
-}
-async function billReport(){
-  if(!window.jspdf)return note('The PDF tool did not load. Check your internet connection and reload the page.');
-  if(!dl)return note('Download is not available in this view.');
-  const doc=new window.jspdf.jsPDF({unit:'mm',format:'a4',orientation:'landscape'}),s=stats(day),f=n=>fmt(n);
-  const L=S.entries.filter(e=>e.date===day).sort((a,b)=>(a.ts||0)-(b.ts||0)),G={},order=[];
-  L.forEach(e=>{const k=e.inv?e.inv+'|'+e.staff+'|'+e.st:'x'+e.id;
-    if(!G[k]){G[k]={inv:e.inv||'-',cust:'',staff:e.staff,st:e.st,types:new Set(),det:[],cnt:0};order.push(k)}
-    const g=G[k];if(e.cust)g.cust=e.cust;g.types.add(e.type);
-    g.det.push(e.type==='INV'?'INV '+f(e.amt)+' (incentive only)':e.mode==='NP'?'NOT PAID '+f(e.amt):e.mode+' '+f(e.amt));
-    if(e.type!=='INV'&&live(e))g.cnt+=+e.amt||0});
-  const rows=order.map(k=>{const g=G[k];return [g.inv,g.cust,g.staff,g.st==='RS'?'Retail':'Wholesale',[...g.types].join('+'),g.det.join(' + '),f(g.cnt)]});
-  doc.setFontSize(14);doc.text('Chris Bottle Crafters - Daily Sale (Bill wise)',14,14);doc.setFontSize(10);doc.text('Date: '+day,14,20);
-  doc.autoTable({startY:24,head:[['Inv','Customer','Salesperson','R/W','Type','Payment details','Counted in sale (Rs)']],body:rows.length?rows:[['No entries','','','','','','']],foot:[['','','','','','Retail '+f(s.rs)+'  |  Wholesale '+f(s.ws)+'  |  Total',f(s.total)]],theme:'grid',styles:{fontSize:8.5},headStyles:{fillColor:[31,122,77]},footStyles:{fillColor:[230,230,230],textColor:0},didParseCell:d=>{if(d.column.index===6)d.cell.styles.halign='right'}});
-  try{await dl.save({filename:'daily-sale-billwise-'+day+'.pdf',data:doc.output('arraybuffer')})}catch(e){if(!e||e.code!=='declined')oops(e)}
-}
-async function advReport(){
-  if(!window.jspdf)return note('The PDF tool did not load. Check your internet connection and reload the page.');
-  if(!dl)return note('Download is not available in this view.');
-  const doc=new window.jspdf.jsPDF({unit:'mm',format:'a4'}),m=day.slice(0,7),A=S.expenses.filter(x=>x.type==='ADV'),f=n=>fmt(n),nm=x=>x.staff||'(no staff)',s=l=>l.reduce((a,x)=>a+(+x.amt||0),0),names=[...new Set(A.map(nm))].sort(),M=A.filter(x=>x.date.startsWith(m)).sort((a,b)=>a.date<b.date?-1:1);
-  doc.setFontSize(14);doc.text('Chris Bottle Crafters - Staff Advance Statement',14,14);doc.setFontSize(10);doc.text('Month: '+m,14,20);
-  const hd={fillColor:[31,122,77]};
-  doc.autoTable({startY:24,head:[['Staff','Given this month (Rs)','Total given to date (Rs)']],body:names.length?names.map(n=>{const l=A.filter(x=>nm(x)===n);return [n,f(s(l.filter(x=>x.date.startsWith(m)))),f(s(l))]}):[['No advances','','']],foot:[['Total',f(s(M)),f(s(A))]],theme:'grid',styles:{fontSize:9},headStyles:hd,footStyles:{fillColor:[230,230,230],textColor:0},didParseCell:d=>{if(d.column.index>0)d.cell.styles.halign='right'}});
-  const y=doc.lastAutoTable.finalY+9;doc.setFontSize(11);doc.text('Advances given in '+m,14,y);
-  doc.autoTable({startY:y+2,head:[['Date','Staff','Note','Amount (Rs)']],body:M.length?M.map(x=>[x.date,nm(x),x.item,f(x.amt)]):[['No advances this month','','','']],theme:'grid',styles:{fontSize:9},headStyles:hd,didParseCell:d=>{if(d.column.index===3)d.cell.styles.halign='right'}});
-  try{await dl.save({filename:'staff-advance-'+m+'.pdf',data:doc.output('arraybuffer')})}catch(e){if(!e||e.code!=='declined')oops(e)}
-}
-async function incReport(only){
-  if(!window.jspdf)return note('The PDF tool did not load. Check your internet connection and reload the page.');
-  if(!dl)return note('Download is not available in this view.');
-  const doc=new window.jspdf.jsPDF({unit:'mm',format:'a4',orientation:'landscape'}),m=day.slice(0,7),[y,mo]=m.split('-').map(Number),n=new Date(y,mo,0).getDate();
-  const names=[...new Set([...STAFF,...S.entries.filter(e=>e.date.startsWith(m)).map(e=>e.staff)])].filter(Boolean);
-  const days=[...Array(n)].map((_,i)=>{const d=m+'-'+String(i+1).padStart(2,'0');return {d,s:stats(d)}});
-  const g=(r,nm,k)=>(r.s.st[nm]||{})[k]||0,f=v=>fmt(v),z=v=>v?f(v):'-';
-  const tbl=(k,title,first)=>{if(!first)doc.addPage();
-    doc.setFontSize(14);doc.text('Chris Bottle Crafters - '+title,14,13);doc.setFontSize(10);doc.text('Month: '+m,14,19);
-    doc.autoTable({startY:22,head:[['Date',...names,'Total']],
-      body:days.map(r=>[r.d.slice(8)+'-'+r.d.slice(5,7),...names.map(nm=>z(g(r,nm,k))),z(names.reduce((a,nm)=>a+g(r,nm,k),0))]),
-      foot:[['Total',...names.map(nm=>f(days.reduce((a,r)=>a+g(r,nm,k),0))),f(days.reduce((a,r)=>a+names.reduce((b,nm)=>b+g(r,nm,k),0),0))]],
-      theme:'grid',styles:{fontSize:7,cellPadding:1},headStyles:{fillColor:[31,122,77]},footStyles:{fillColor:[230,230,230],textColor:0},didParseCell:d=>{if(d.column.index>0)d.cell.styles.halign='right'}})};
-  if(only==='RS')tbl('RS','Retail Incentive Record',true);else tbl('WS','Wholesale Incentive Record',true);
-  try{await dl.save({filename:'incentive-'+(only==='RS'?'retail':'wholesale')+'-'+m+'.pdf',data:doc.output('arraybuffer')})}catch(e){if(!e||e.code!=='declined')oops(e)}
-}
-async function expReport(){
-  if(!window.jspdf)return note('The PDF tool did not load. Check your internet connection and reload the page.');
-  if(!dl)return note('Download is not available in this view.');
-  const doc=new window.jspdf.jsPDF({unit:'mm',format:'a4'}),m=day.slice(0,7),f=n=>fmt(n),L=S.expenses.filter(x=>x.date.startsWith(m)).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0),tot=L.reduce((a,x)=>a+(+x.amt||0),0);
-  const tl=x=>x.type==='PERS'?'Personal':x.type==='ADV'?'Advance: '+(x.staff||'-'):'Company',hd={fillColor:[31,122,77]},ft={fillColor:[230,230,230],textColor:0};
-  doc.setFontSize(14);doc.text('Chris Bottle Crafters - Expense Report',14,14);doc.setFontSize(10);doc.text('Month: '+m,14,20);
-  doc.autoTable({startY:24,head:[['Category','Company','Personal','Advance','Total (Rs)']],body:ALLC.filter(c=>catSum(L,c)).map(c=>{const l=L.filter(x=>(x.cat||'')===c);return [c||'NO CATEGORY',f(xsum(l,'COMP')),f(xsum(l,'PERS')),f(xsum(l,'ADV')),f(catSum(L,c))]}),foot:[['Total',f(xsum(L,'COMP')),f(xsum(L,'PERS')),f(xsum(L,'ADV')),f(tot)]],theme:'grid',styles:{fontSize:9},headStyles:hd,footStyles:ft,didParseCell:d=>{if(d.column.index>0)d.cell.styles.halign='right'}});
-  let y=doc.lastAutoTable.finalY+8;doc.setFontSize(11);doc.text('Paid from',14,y);
-  doc.autoTable({startY:y+2,head:[['Paid from','Amount (Rs)']],body:SRCS.filter(s=>srcSum(L,s)).map(s=>[s,f(srcSum(L,s))]),foot:[['Total',f(tot)]],theme:'grid',styles:{fontSize:9},headStyles:hd,footStyles:ft,didParseCell:d=>{if(d.column.index>0)d.cell.styles.halign='right'}});
-  y=doc.lastAutoTable.finalY+8;doc.setFontSize(11);doc.text('All expenses',14,y);
-  doc.autoTable({startY:y+2,head:[['Date','Category / note','Type','Paid from','Amount (Rs)']],body:L.length?L.map(x=>[x.date,x.cat?x.cat+(x.item?' - '+x.item:''):x.item,tl(x),x.src||'CASH IN HAND',f(x.amt)]):[['No expenses','','','','']],foot:[['','','','Total',f(tot)]],theme:'grid',styles:{fontSize:8.5},headStyles:hd,footStyles:ft,didParseCell:d=>{if(d.column.index===4)d.cell.styles.halign='right'}});
-  try{await dl.save({filename:'expense-report-'+m+'.pdf',data:doc.output('arraybuffer')})}catch(e){if(!e||e.code!=='declined')oops(e)}
-}
-let pieMode='ALL';
-const PAL=['#1f7a4d','#d98a2b','#3b82c4','#b04a8f','#c2493d','#6a5acd','#2aa198','#8a8f3a','#9c6b4e','#6b7280'];
-function pieCard(M){
-  const val=a=>pieMode==='RS'?a.RS:pieMode==='WS'?a.WS:a.RS+a.WS;
-  const rows=Object.entries(M.st).map(([n,a])=>[n,val(a)]).filter(r=>r[1]>0).sort((a,b)=>b[1]-a[1]),tot=rows.reduce((a,r)=>a+r[1],0);
-  const btn=(k,t)=>`<button class="${pieMode===k?'p':'s'}" style="padding:5px 12px" onclick="pieMode='${k}';render()">${t}</button>`;
-  let svg='';
-  if(tot){const R=90,cx=100,cy=100;let a0=-Math.PI/2;
-    if(rows.length===1)svg=`<circle cx="100" cy="100" r="90" fill="${PAL[0]}"/>`;
-    else rows.forEach((r,i)=>{const a1=a0+r[1]/tot*2*Math.PI,x0=cx+R*Math.cos(a0),y0=cy+R*Math.sin(a0),x1=cx+R*Math.cos(a1),y1=cy+R*Math.sin(a1);
-      svg+=`<path d="M${cx},${cy} L${x0.toFixed(2)},${y0.toFixed(2)} A${R},${R} 0 ${a1-a0>Math.PI?1:0} 1 ${x1.toFixed(2)},${y1.toFixed(2)} Z" fill="${PAL[i%PAL.length]}" stroke="var(--card)" stroke-width="1.5"/>`;a0=a1})}
-  return `<div class="card"><h2>Salesperson share of sale – month</h2><div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">${btn('ALL','Retail + Wholesale')}${btn('RS','Retail')}${btn('WS','Wholesale')}</div>${tot?`<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap"><svg viewBox="0 0 200 200" width="220" height="220" role="img" aria-label="Pie chart of sale by salesperson">${svg}</svg><div class="sc" style="flex:1;min-width:220px"><table><tbody>${rows.map((r,i)=>`<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${PAL[i%PAL.length]};margin-right:6px"></span>${esc(r[0])}</td><td>${fmt(r[1])}</td><td>${(r[1]/tot*100).toFixed(1)}%</td></tr>`).join('')}</tbody><tfoot><tr><td>Total</td><td>${fmt(tot)}</td><td>100%</td></tr></tfoot></table></div></div>`:'<div class="mut">No sale yet this month.</div>'}</div>`}
-/* ---- shell ---- */
-function render(){
-  $('#phead').textContent='Chris Bottle Crafters – '+(TABS.find(t=>t[0]===tab)||[])[1]+' – '+(tab==='dash'||tab==='entry'||tab==='report'?day:tab==='pending'?today():month);
-  $('#nav').innerHTML=TABS.map(t=>`<button class="${tab===t[0]?'on':''}" onclick="tab='${t[0]}';render()">${t[1]}</button>`).join('')+'<button class="s noprint" style="margin-left:auto" onclick="signOut()">Sign out</button>';
-  TABS.forEach(t=>$('#'+t[0]).hidden=tab!==t[0]);
-  if(tab==='dash')renderDash();else if(tab==='entry')renderList();else if(tab==='report')renderReport();else if(tab==='pending')renderPending();else if(tab==='inc')renderInc();else if(tab==='rep')renderRep();else renderMonth();
-  if(RO){document.body.classList.add('ro');$('#warn').innerHTML='<div class="warn">View-only access: you can look at the data and download reports, but you cannot change anything.</div>';document.querySelectorAll('#report .card:not(:first-child) :is(input,select,button)').forEach(e=>{e.disabled=true})}
-}
-async function start(session){
-  const role=(session.user.app_metadata||{}).role||'';
-  if(role!=='editor'&&role!=='viewer'){await sb.auth.signOut();return showLogin('This account has no access yet. Ask the owner to give it the editor or viewer role.')}
-  RO=role!=='editor';$('#warn').innerHTML='';
-  buildEntry();render();
-  await Promise.all(['entries','expenses','days'].map(load));
-  ['entries','expenses','days'].forEach(t=>sb.channel('live-'+t).on('postgres_changes',{event:'*',schema:'public',table:t},()=>loadSoon(t)).subscribe());
-}
-(async () => {
-  loadLocal();
-  buildEntry();
-  render();
-  try{if(window.claude)db=await claude.use('db')}catch(e){db=null}
-  try{const u=await claude.use('user');RO=!!u&&u.can('data.write')===false}catch(e){}
-  if(db){
-    ...
+let sb = null;
+try {
+  if (window.supabase && SUPABASE_URL && SUPABASE_ANON_KEY) {
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   }
-  await initSupabase();
-})();
-</script></body></html>
+} catch(e) {
+  console.error('Supabase initialization error:', e);
+}
+
+const STAFF = ['GE VARGHESE','ABI','NISHANTH','ANANDHU','ANANDHU NEW','SOUMYA','ARYA','ANNA','APPU'];
+const MODES = ['CASH','DLAKSHMI','G PAY','PHPAY','YB POS','CARD','YB ACCOUNT','HDFC','PAID EARLIER','NP'];
+const TABS = [['dash','Dashboard'],['entry','Entry'],['report','Day report'],['pending','Pending bills'],['inc','Incentive'],['month','Month'],['rep','Report']];
+const SRCS = ['CASH IN HAND','DLAKSHMI','CUPBOARD','ANNA'];
+const CATS = ['RENT','WATER','LABOUR','BATA','OVERTIME','STATIONERY','DONATION','PARTY FUND','DIESEL (PICKUP)','OTHER'];
+const ALLC = [...CATS,'ADVANCE',''];
+
+let S = {entries:[], expenses:[]};
+let D = {};
+let tab = 'dash';
+
+const $ = s => document.querySelector(s);
+const fmt = n => new Intl.NumberFormat('en-IN').format(Math.round(n || 0));
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const today = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
+let day = today(), month = today().slice(0, 7);
+const opts = a => a.map(x => `<option>${x}</option>`).join('');
+
+function note(msg) {
+  const t = $('#toast');
+  if(!t) return;
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(note.t);
+  note.t = setTimeout(() => t.style.display = 'none', 6000);
+}
+
+function ask(msg, fn) {
+  $('#mbox').innerHTML = `<h2>${esc(msg)}</h2><div style="display:flex;gap:8px;margin-top:10px"><button class="p" id="yes">Yes, delete</button><button class="s" onclick="$('#modal').style.display='none'">Cancel</button></div>`;
+  $('#modal').style.display = 'flex';
+  $('#yes').onclick = () => { $('#modal').style.display = 'none'; fn(); };
+}
+
+const oops = e => note('Database notice: ' + ((e && e.message) || e));
+
+function persistLocal() {
+  try { localStorage.setItem('cbc_sales_data', JSON.stringify({S, D})); } catch(e) {}
+}
+
+function loadLocal() {
+  try {
+    const raw = localStorage.getItem('cbc_sales_data');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.S) S = parsed.S;
+      if (parsed.D) D = parsed.D;
+    }
+  } catch(e) {}
+}
+
+async function add(c, o) {
+  try {
+    if (sb) {
+      const { data, error } = await sb.from(c).insert([o]).select();
+      if (error) throw error;
+      if (data && data[0]) {
+        const idx = S[c].findIndex(x => x.id === data[0].id);
+        if (idx === -1) S[c].push(data[0]);
+      }
+    } else {
+      S[c].push({id: Math.random().toString(36).slice(2), ...o});
+      persistLocal();
+    }
+    render();
+  } catch(e) { oops(e); }
+}
+
+async function upd(c, id, o) {
+  try {
+    if (sb) {
+      const { error } = await sb.from(c).update(o).eq('id', id);
+      if (error) throw error;
+    }
+    const itm = S[c].find(x => x.id === id);
+    if (itm) Object.assign(itm, o);
+    persistLocal();
+    render();
+  } catch(e) { oops(e); }
+}
+
+async function del(c, id) {
+  try {
+    if (sb) {
+      const { error } = await sb.from(c).delete().eq('id', id);
+      if (error) throw error;
+    }
+    S[c] = S
